@@ -2,7 +2,7 @@ import math
 from sympy import (
     Float, Idx, IndexedBase, Integer, Matrix, MatrixSymbol, Range, sin, symbols, Symbol, Tuple, Lt, nan, oo
 )
-from sympy.core.relational import Relational, StrictLessThan
+from sympy.core.relational import StrictLessThan
 from sympy.utilities.pytest import raises, XFAIL
 
 
