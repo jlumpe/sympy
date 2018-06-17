@@ -10,7 +10,8 @@ AST Type Tree
 ::
 
   *Basic*
-       |--->Assignment
+       |--->AssignmentBase
+       |             |--->Assignment
        |             |--->AugmentedAssignment
        |                                    |--->AddAugmentedAssignment
        |                                    |--->SubAugmentedAssignment
