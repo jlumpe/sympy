@@ -16,9 +16,6 @@ from sympy.functions import (Abs, Chi, Ci, Ei, KroneckerDelta,
     meijerg, sin, sqrt, subfactorial, tan, uppergamma,
     elliptic_k, elliptic_f, elliptic_e, elliptic_pi, DiracDelta)
 
-from sympy.codegen.ast import (Assignment, AddAugmentedAssignment,
-    SubAugmentedAssignment, MulAugmentedAssignment, DivAugmentedAssignment, ModAugmentedAssignment)
-
 from sympy.matrices import Adjoint, Inverse, MatrixSymbol, Transpose
 
 from sympy.printing.pretty import pretty as xpretty
@@ -1087,79 +1084,6 @@ y + 1     \
     assert pretty(expr) in [ascii_str_1, ascii_str_2]
     assert upretty(expr) in [ucode_str_1, ucode_str_2]
 
-def test_Assignment():
-    expr = Assignment(x, y)
-    ascii_str = \
-"""\
-x := y\
-"""
-    ucode_str = \
-u("""\
-x := y\
-""")
-    assert pretty(expr) == ascii_str
-    assert upretty(expr) == ucode_str
-
-def test_AugmentedAssignment():
-    expr = AddAugmentedAssignment(x, y)
-    ascii_str = \
-"""\
-x += y\
-"""
-    ucode_str = \
-u("""\
-x += y\
-""")
-    assert pretty(expr) == ascii_str
-    assert upretty(expr) == ucode_str
-
-    expr = SubAugmentedAssignment(x, y)
-    ascii_str = \
-"""\
-x -= y\
-"""
-    ucode_str = \
-u("""\
-x -= y\
-""")
-    assert pretty(expr) == ascii_str
-    assert upretty(expr) == ucode_str
-
-    expr = MulAugmentedAssignment(x, y)
-    ascii_str = \
-"""\
-x *= y\
-"""
-    ucode_str = \
-u("""\
-x *= y\
-""")
-    assert pretty(expr) == ascii_str
-    assert upretty(expr) == ucode_str
-
-    expr = DivAugmentedAssignment(x, y)
-    ascii_str = \
-"""\
-x /= y\
-"""
-    ucode_str = \
-u("""\
-x /= y\
-""")
-    assert pretty(expr) == ascii_str
-    assert upretty(expr) == ucode_str
-
-    expr = ModAugmentedAssignment(x, y)
-    ascii_str = \
-"""\
-x %= y\
-"""
-    ucode_str = \
-u("""\
-x %= y\
-""")
-    assert pretty(expr) == ascii_str
-    assert upretty(expr) == ucode_str
 
 def test_issue_7117():
     # See also issue #5031 (hence the evaluate=False in these).
