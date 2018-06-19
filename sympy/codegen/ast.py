@@ -11,27 +11,32 @@ AST Type Tree
 
     Basic
     |---AstNode
-        |---AssignmentBase
-        |   |---Assignment
-        |   |---AugmentedAssignment
-        |       |---AddAugmentedAssignment
-        |       |---SubAugmentedAssignment
-        |       |---MulAugmentedAssignment
-        |       |---DivAugmentedAssignment
-        |       |---ModAugmentedAssignment
-        |
-        |---Print
-        |---Declaration
-        |---Return
-        |---Break
-        |---Continue
-        |---FunctionCall
-        |---FunctionPrototype
-        |   |---FunctionDeclaration
-        |
-        |---For
-        |---While
-        |---Scope
+        |---Statement
+        |   |---SimpleStatement
+        |   |   |---AssignmentBase
+        |   |   |   |---Assignment
+        |   |   |   |---AugmentedAssignment
+        |   |   |       |---AddAugmentedAssignment
+        |   |   |       |---SubAugmentedAssignment
+        |   |   |       |---MulAugmentedAssignment
+        |   |   |       |---DivAugmentedAssignment
+        |   |   |       |---ModAugmentedAssignment
+        |   |   |
+        |   |   |---PrintStatement
+        |   |   |---Declaration
+        |   |   |---Return
+        |   |   |---BreakStatement
+        |   |   |---ContinueStatement
+        |   |   |---Comment
+        |   |   |---FunctionCall
+        |   |   |---FunctionPrototype
+        |   |
+        |   |---CompoundStatement
+        |       |---If
+        |       |---For
+        |       |---While
+        |       |---FunctionDeclaration
+        |       |---Scope
         |
         |---Type
         |   |---IntBaseType
@@ -48,7 +53,6 @@ AST Type Tree
         |---Attribute
         |---String
         |   |---QuotedString
-        |   |---Comment
         |
         |---Variable
         |   |---Pointer
@@ -333,7 +337,19 @@ class ConstructSlots(Basic):
             return kwargs
 
 
-class BreakStatement(AstNode):
+class Statement(AstNode):
+    pass
+
+
+class SimpleStatement(Statement):
+    """ A statement which does not contain any other statements."""
+
+
+class CompoundStatement(Statement):
+    """ A statement which contains other statements."""
+
+
+class Break(SimpleStatement):
     """ Represents 'break' in C/Python ('exit' in Fortran).
 
     Use the premade instance ``break_`` or instantiate manually.
@@ -352,7 +368,7 @@ class BreakStatement(AstNode):
 break_ = BreakStatement()
 
 
-class ContinueStatement(AstNode):
+class Continue(SimpleStatement):
     """ Represents 'continue' in C/Python ('cycle' in Fortran)
 
     Use the premade instance ``continue_`` or instantiate manually.
@@ -397,7 +413,7 @@ class NoneToken(AstNode):
 none = NoneToken()
 
 
-class AssignmentBase(Basic):
+class AssignmentBase(SimpleStatement):
     """ Abstract base class for Assignment and AugmentedAssignment.
 
     Attributes:
@@ -881,7 +897,8 @@ class String(ConstructSlots, AstNode):
 class QuotedString(String):
     """ Represents a string which should be printed with quotes. """
 
-class Comment(String):
+
+class Comment(SimpleStatement):
     """ Represents a comment. """
 
 
@@ -1538,7 +1555,7 @@ class Element(ConstructSlots, AstNode):
     _construct_offset = staticmethod(sympify)
 
 
-class Declaration(ConstructSlots, AstNode):
+class Declaration(ConstructSlots, SimpleStatement):
     """ Represents a variable declaration
 
     Parameters
@@ -1561,7 +1578,7 @@ class Declaration(ConstructSlots, AstNode):
     _construct_variable = Variable
 
 
-class While(ConstructSlots, AstNode):
+class While(CompoundStatement):
     """ Represents a 'for-loop' in the code.
 
     Expressions are of the form:
@@ -1599,7 +1616,7 @@ class While(ConstructSlots, AstNode):
             return CodeBlock(*itr)
 
 
-class Scope(ConstructSlots, AstNode):
+class Scope(CompoundStatement):
     """ Represents a scope in the code.
 
     Parameters
@@ -1676,7 +1693,7 @@ class Print(ConstructSlots, AstNode):
     _construct_file = Stream
 
 
-class FunctionPrototype(HasAttrs):
+class FunctionPrototype(HasAttrs, SimpleStatement):
     """ Represents a function prototype
 
     Allows the user to generate forward declaration in e.g. C/C++.
@@ -1725,7 +1742,7 @@ class FunctionPrototype(HasAttrs):
         return cls(**func_def.kwargs(exclude=('body',)))
 
 
-class FunctionDefinition(FunctionPrototype):
+class FunctionDefinition(HasAttrs, CompoundStatement):
     """ Represents a function definition in the code.
 
     Parameters
@@ -1772,11 +1789,11 @@ class FunctionDefinition(FunctionPrototype):
         return cls(body=body, **func_proto.kwargs())
 
 
-class Return(AstNode):
+class Return(SimpleStatement):
     """ Represents a return command in the code. """
 
 
-class FunctionCall(ConstructSlots, AstNode, Expr):
+class FunctionCall(SimpleStatement, Expr):
     """ Represents a call to a function in the code.
 
     Parameters
