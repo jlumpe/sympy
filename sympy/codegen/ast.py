@@ -420,7 +420,6 @@ class AssignmentBase(Basic):
 
         Derived classes may wish to override this.
         """
-        from sympy.tensor.indexed import Indexed
         from sympy.matrices.expressions.matexpr import (
             MatrixElement, MatrixSymbol)
         from sympy.tensor.indexed import Indexed
