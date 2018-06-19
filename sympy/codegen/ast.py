@@ -9,51 +9,53 @@ AST Type Tree
 -------------
 ::
 
-  *Basic*
-       |--->AssignmentBase
-       |             |--->Assignment
-       |             |--->AugmentedAssignment
-       |                                    |--->AddAugmentedAssignment
-       |                                    |--->SubAugmentedAssignment
-       |                                    |--->MulAugmentedAssignment
-       |                                    |--->DivAugmentedAssignment
-       |                                    |--->ModAugmentedAssignment
-       |
-       |--->CodeBlock
-       |
-       |
-       |--->Token
-       |        |--->Attribute
-       |        |--->For
-       |        |--->String
-       |        |       |--->QuotedString
-       |        |       |--->Comment
-       |        |--->Type
-       |        |       |--->IntBaseType
-       |        |       |              |--->_SizedIntType
-       |        |       |                               |--->SignedIntType
-       |        |       |                               |--->UnsignedIntType
-       |        |       |--->FloatBaseType
-       |        |                        |--->FloatType
-       |        |                        |--->ComplexBaseType
-       |        |                                           |--->ComplexType
-       |        |--->Node
-       |        |       |--->Variable
-       |        |       |           |---> Pointer
-       |        |       |--->FunctionPrototype
-       |        |                            |--->FunctionDefinition
-       |        |--->Element
-       |        |--->Declaration
-       |        |--->While
-       |        |--->Scope
-       |        |--->Stream
-       |        |--->Print
-       |        |--->FunctionCall
-       |        |--->BreakToken
-       |        |--->ContinueToken
-       |        |--->NoneToken
-       |
-       |--->Return
+    Basic
+    |---AstNode
+        |---AssignmentBase
+        |   |---Assignment
+        |   |---AugmentedAssignment
+        |       |---AddAugmentedAssignment
+        |       |---SubAugmentedAssignment
+        |       |---MulAugmentedAssignment
+        |       |---DivAugmentedAssignment
+        |       |---ModAugmentedAssignment
+        |
+        |---Print
+        |---Declaration
+        |---Return
+        |---Break
+        |---Continue
+        |---FunctionCall
+        |---FunctionPrototype
+        |   |---FunctionDeclaration
+        |
+        |---For
+        |---While
+        |---Scope
+        |
+        |---Type
+        |   |---IntBaseType
+        |   |   |---_SizedIntType
+        |   |       |---SignedIntType
+        |   |       |---UnsignedIntType
+        |   |
+        |   |---FloatBaseType
+        |       |---FloatType
+        |       |---ComplexBaseType
+        |           |----ComplexType
+        |
+        |---CodeBlock
+        |---Attribute
+        |---String
+        |   |---QuotedString
+        |   |---Comment
+        |
+        |---Variable
+        |   |---Pointer
+        |
+        |---Element
+        |---Stream
+        |---NoneToken
 
 
 Predefined types
@@ -155,112 +157,21 @@ def _mk_Tuple(args):
     return Tuple(*args)
 
 
-class Token(Basic):
+class AstNode(Basic):
     """ Base class for the AST types.
 
-    Defining fields are set in ``__slots__``. Attributes (defined in __slots__)
-    are only allowed to contain instances of Basic (unless atomic, see
-    ``String``). The arguments to ``__new__()`` correspond to the attributes in
-    the order defined in ``__slots__`. The ``defaults`` class attribute is a
-    dictionary mapping attribute names to their default values.
-
-    Subclasses should not need to override the ``__new__()`` method. They may
-    define a class or static method named ``_construct_<attr>`` for each
-    attribute to process the value passed to ``__new__()``. Attributes listed
-    in the class attribute ``not_in_args`` are not passed to :class:`sympy.Basic`.
+    The actual implementation of this class mostly just concerns the string
+    representation, more precise behavior is defined in subclasses.
     """
 
-    __slots__ = []
-    defaults = {}
-    not_in_args = []
     indented_args = ['body']
-
-    @property
-    def is_Atom(self):
-        return len(self.__slots__) == 0
-
-    @classmethod
-    def _get_constructor(cls, attr):
-        """ Get the constructor function for an attribute by name. """
-        return getattr(cls, '_construct_%s' % attr, lambda x: x)
-
-    @classmethod
-    def _construct(cls, attr, arg):
-        """ Construct an attribute value from argument passed to ``__new__()``. """
-        if arg == None:
-            return cls.defaults.get(attr, none)
-        else:
-            if isinstance(arg, Dummy):  # sympy's replace uses Dummy instances
-                return arg
-            else:
-                return cls._get_constructor(attr)(arg)
-
-    def __new__(cls, *args, **kwargs):
-        # Pass through existing instances when given as sole argument
-        if len(args) == 1 and not kwargs and isinstance(args[0], cls):
-            return args[0]
-
-        if len(args) > len(cls.__slots__):
-            raise ValueError("Too many arguments (%d), expected at most %d" % (len(args), len(cls.__slots__)))
-
-        attrvals = []
-
-        # Process positional arguments
-        for attrname, argval in zip(cls.__slots__, args):
-            if attrname in kwargs:
-                raise TypeError('Got multiple values for attribute %r' % attrname)
-
-            attrvals.append(cls._construct(attrname, argval))
-
-        # Process keyword arguments
-        for attrname in cls.__slots__[len(args):]:
-            if attrname in kwargs:
-                argval = kwargs.pop(attrname)
-
-            elif attrname in cls.defaults:
-                argval = cls.defaults[attrname]
-
-            else:
-                raise TypeError('No value for %r given and attribute has no default' % attrname)
-
-            attrvals.append(cls._construct(attrname, argval))
-
-        if kwargs:
-            raise ValueError("Unknown keyword arguments: %s" % ' '.join(kwargs))
-
-        # Parent constructor
-        basic_args = [
-            val for attr, val in zip(cls.__slots__, attrvals)
-            if attr not in cls.not_in_args
-        ]
-        obj = Basic.__new__(cls, *basic_args)
-
-        # Set attributes
-        for attr, arg in zip(cls.__slots__, attrvals):
-            setattr(obj, attr, arg)
-
-        return obj
-
-    def __eq__(self, other):
-        if not isinstance(other, self.__class__):
-            return False
-        for attr in self.__slots__:
-            if getattr(self, attr) != getattr(other, attr):
-                return False
-        return True
-
-    def _hashable_content(self):
-        return tuple([getattr(self, attr) for attr in self.__slots__])
-
-    def __hash__(self):
-        return super(Token, self).__hash__()
 
     def _joiner(self, k, indent_level):
         return (',\n' + ' '*indent_level) if k in self.indented_args else ', '
 
     def _indented(self, printer, k, v, il, *args, **kwargs):
         def _print(arg):
-            if isinstance(arg, Token):
+            if isinstance(arg, AstNode):
                 return printer._print(arg, *args, indent_level=il, joiner=self._joiner(k, il), **kwargs)
             else:
                 return printer._print(v, *args, **kwargs)
@@ -302,6 +213,108 @@ class Token(Basic):
         from sympy.printing import srepr
         return srepr(self)
 
+
+class ConstructSlots(Basic):
+    """ Mixin for subclasses of Basic to conveniently set up instance attributes.
+
+    Defining fields are set in ``__slots__``. Fields are only allowed to contain
+    instances of Basic (unless atomic, see ``String``). The arguments to
+    ``__new__()`` correspond to the attributes in the order defined in
+    ``__slots__`. The ``defaults`` class attribute is a dictionary mapping
+    attribute names to their default values.
+
+    Subclasses should not need to override the ``__new__()`` method. They may
+    define a class or static method named ``_construct_<field>`` for each
+    attribute to process the value passed to ``__new__()``. Attributes listed in
+    the class attribute ``not_in_args`` are not passed to :class:`sympy.Basic`.
+    """
+
+    __slots__ = ()
+    defaults = {}
+    not_in_args = []
+
+    @property
+    def is_Atom(self):
+        return len(self.__slots__) == 0
+
+    @classmethod
+    def _get_constructor(cls, attr):
+        """ Get the constructor function for an attribute by name. """
+        return getattr(cls, '_construct_%s' % attr, lambda x: x)
+
+    @classmethod
+    def _construct(cls, attr, arg):
+        """ Construct an attribute value from argument passed to ``__new__()``. """
+        if arg == None:
+            return cls.defaults.get(attr, none)
+        else:
+            if isinstance(arg, Dummy):  # sympy's replace uses Dummy instances
+                return arg
+            else:
+                return cls._get_constructor(attr)(arg)
+
+    def __new__(cls, *args, **kwargs):
+        # Pass through existing instances when given as sole argument
+        if len(args) == 1 and not kwargs and isinstance(args[0], cls):
+            return args[0]
+
+        if len(args) > len(cls.__slots__):
+            raise ValueError("Too many arguments (%d), expected at most %d" % (len(args), len(cls.__slots__)))
+
+        fieldvals = []
+
+        # Process positional arguments
+        for field, argval in zip(cls.__slots__, args):
+            if field in kwargs:
+                raise TypeError('Got multiple values for field %r' % field)
+
+            fieldvals.append(cls._construct(field, argval))
+
+        # Process keyword arguments
+        for field in cls.__slots__[len(args):]:
+            if field in kwargs:
+                argval = kwargs.pop(field)
+
+            elif field in cls.defaults:
+                argval = cls.defaults[field]
+
+            else:
+                raise TypeError('No value for %r given and field has no default' % field)
+
+            fieldvals.append(cls._construct(field, argval))
+
+        if kwargs:
+            raise ValueError("Unknown keyword arguments: %s" % ' '.join(kwargs))
+
+        # Parent constructor
+        basic_args = []
+        for field, val in zip(cls.__slots__, fieldvals):
+            if field not in cls.not_in_args:
+                if not isinstance(val, Basic):
+                    raise TypeError(
+                        'Field values must be instances of Basic, not %r'
+                        % type(val)
+                    )
+                basic_args.append(val)
+        obj = Basic.__new__(cls, *basic_args)
+
+        # Set field values
+        for field, arg in zip(cls.__slots__, fieldvals):
+            setattr(obj, field, arg)
+
+        return obj
+
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        for attr in self.__slots__:
+            if getattr(self, attr) != getattr(other, attr):
+                return False
+        return True
+
+    def _hashable_content(self):
+        return tuple([getattr(self, attr) for attr in self.__slots__])
+
     def kwargs(self, exclude=(), apply=None):
         """ Get instance's attributes as dict of keyword arguments.
 
@@ -320,7 +333,7 @@ class Token(Basic):
             return kwargs
 
 
-class BreakToken(Token):
+class BreakStatement(AstNode):
     """ Represents 'break' in C/Python ('exit' in Fortran).
 
     Use the premade instance ``break_`` or instantiate manually.
@@ -336,10 +349,10 @@ class BreakToken(Token):
     'exit'
     """
 
-break_ = BreakToken()
+break_ = BreakStatement()
 
 
-class ContinueToken(Token):
+class ContinueStatement(AstNode):
     """ Represents 'continue' in C/Python ('cycle' in Fortran)
 
     Use the premade instance ``continue_`` or instantiate manually.
@@ -355,9 +368,10 @@ class ContinueToken(Token):
     'cycle'
     """
 
-continue_ = ContinueToken()
+continue_ = ContinueStatement()
 
-class NoneToken(Token):
+
+class NoneToken(AstNode):
     """ The AST equivalence of Python's NoneType
 
     The corresponding instance of Python's ``None`` is ``none``.
@@ -378,8 +392,7 @@ class NoneToken(Token):
         return ()
 
     def __hash__(self):
-        return super(Token, self).__hash__()
-
+        return super(AstNode, self).__hash__()
 
 none = NoneToken()
 
@@ -567,7 +580,7 @@ def aug_assign(lhs, op, rhs):
     return augassign_classes[op](lhs, rhs)
 
 
-class CodeBlock(Basic):
+class CodeBlock(AstNode):
     """
     Represents a block of code
 
@@ -780,7 +793,7 @@ class CodeBlock(Basic):
         return self.topological_sort(new_assignments + new_block)
 
 
-class For(Token):
+class For(ConstructSlots, AstNode):
     """Represents a 'for-loop' in the code.
 
     Expressions are of the form:
@@ -807,7 +820,7 @@ class For(Token):
     ))
 
     """
-    __slots__ = ['target', 'iterable', 'body']
+    __slots__ = ('target', 'iterable', 'body')
     _construct_target = staticmethod(_sympify)
 
     @classmethod
@@ -826,7 +839,7 @@ class For(Token):
         return _sympify(itr)
 
 
-class String(Token):
+class String(ConstructSlots, AstNode):
     """ SymPy object representing a string.
 
     Atomic object which is not an expression (as opposed to Symbol).
@@ -851,7 +864,7 @@ class String(Token):
     String('foo')
 
     """
-    __slots__ = ['text']
+    __slots__ = ('text',)
     not_in_args = ['text']
     is_Atom = True
 
@@ -871,8 +884,9 @@ class QuotedString(String):
 class Comment(String):
     """ Represents a comment. """
 
-class Node(Token):
-    """ Subclass of Token, carrying the attribute 'attrs' (Tuple)
+
+class HasAttrs(ConstructSlots, AstNode):
+    """ Subclass of AstNode, carrying the attribute 'attrs' (Tuple)
 
     Examples
     ========
@@ -892,7 +906,7 @@ class Node(Token):
 
     """
 
-    __slots__ = ['attrs']
+    __slots__ = ('attrs',)
 
     defaults = {'attrs': Tuple()}
 
@@ -905,7 +919,7 @@ class Node(Token):
                 return attr.parameters
 
 
-class Type(Token):
+class Type(ConstructSlots, AstNode):
     """ Represents a type.
 
     The naming is a super-set of NumPy naming. Type has a classmethod
@@ -958,7 +972,7 @@ class Type(Token):
     .. [1] https://docs.scipy.org/doc/numpy/user/basics.types.html
 
     """
-    __slots__ = ['name']
+    __slots__ = ('name',)
 
     _construct_name = String
 
@@ -1085,12 +1099,12 @@ class Type(Token):
 
 class IntBaseType(Type):
     """ Integer base type, contains no size information. """
-    __slots__ = ['name']
+    __slots__ = ('name',)
     cast_nocheck = lambda self, i: Integer(int(i))
 
 
 class _SizedIntType(IntBaseType):
-    __slots__ = ['name', 'nbits']
+    __slots__ = ('name', 'nbits')
 
     _construct_nbits = Integer
 
@@ -1169,7 +1183,7 @@ class FloatType(FloatBaseType):
     ValueError: Maximum value for data type smaller than new value.
     """
 
-    __slots__ = ['name', 'nbits', 'nmant', 'nexp']
+    __slots__ = ('name', 'nbits', 'nmant', 'nexp')
 
     _construct_nbits = _construct_nmant = _construct_nexp = Integer
 
@@ -1288,7 +1302,7 @@ complex_ = ComplexBaseType('complex')
 bool_ = Type('bool')
 
 
-class Attribute(Token):
+class Attribute(ConstructSlots, Basic):
     """ Attribute (possibly parametrized)
 
     For use with :class:`sympy.codegen.ast.Node` (which takes instances of
@@ -1314,7 +1328,7 @@ class Attribute(Token):
     >>> a.parameters == (1, 2, 3)
     True
     """
-    __slots__ = ['name', 'parameters']
+    __slots__ = ('name', 'parameters')
     defaults = {'parameters': Tuple()}
     _construct_name = String
     _construct_parameters = staticmethod(_mk_Tuple)
@@ -1330,7 +1344,7 @@ value_const = Attribute('value_const')
 pointer_const = Attribute('pointer_const')
 
 
-class Variable(Node):
+class Variable(HasAttrs):
     """ Represents a variable
 
     Parameters
@@ -1380,8 +1394,8 @@ class Variable(Node):
 
     """
 
-    __slots__ = ['symbol', 'type', 'value'] + Node.__slots__
-    defaults = dict(chain(Node.defaults.items(), {
+    __slots__ = ('symbol', 'type', 'value')
+    defaults = dict(chain(HasAttrs.defaults.items(), {
         'type': untyped,
         'value': none
     }.items()))
@@ -1497,7 +1511,7 @@ class Pointer(Variable):
             return Element(self.symbol, (key,))
 
 
-class Element(Token):
+class Element(ConstructSlots, AstNode):
     """ Element in (a possibly N-dimensional) array.
 
     Examples
@@ -1516,7 +1530,7 @@ class Element(Token):
     'x[i*l + j*m + k*n + o]'
 
     """
-    __slots__ = ['symbol', 'indices', 'strides', 'offset']
+    __slots__ = ('symbol', 'indices', 'strides', 'offset')
     defaults = {'strides': none, 'offset': none}
     _construct_symbol = staticmethod(sympify)
     _construct_indices = staticmethod(lambda arg: Tuple(*arg))
@@ -1524,7 +1538,7 @@ class Element(Token):
     _construct_offset = staticmethod(sympify)
 
 
-class Declaration(Token):
+class Declaration(ConstructSlots, AstNode):
     """ Represents a variable declaration
 
     Parameters
@@ -1543,11 +1557,11 @@ class Declaration(Token):
     >>> z.variable.value == None
     True
     """
-    __slots__ = ['variable']
+    __slots__ = ('variable',)
     _construct_variable = Variable
 
 
-class While(Token):
+class While(ConstructSlots, AstNode):
     """ Represents a 'for-loop' in the code.
 
     Expressions are of the form:
@@ -1574,7 +1588,7 @@ class While(Token):
     ... ])
 
     """
-    __slots__ = ['condition', 'body']
+    __slots__ = ('condition', 'body')
     _construct_condition = staticmethod(lambda cond: _sympify(cond))
 
     @classmethod
@@ -1585,7 +1599,7 @@ class While(Token):
             return CodeBlock(*itr)
 
 
-class Scope(Token):
+class Scope(ConstructSlots, AstNode):
     """ Represents a scope in the code.
 
     Parameters
@@ -1595,7 +1609,7 @@ class Scope(Token):
         When passed an iterable it is used to instantiate a CodeBlock.
 
     """
-    __slots__ = ['body']
+    __slots__ = ('body',)
 
     @classmethod
     def _construct_body(cls, itr):
@@ -1605,7 +1619,7 @@ class Scope(Token):
             return CodeBlock(*itr)
 
 
-class Stream(Token):
+class Stream(ConstructSlots, AstNode):
     """ Represents a stream.
 
     There are two predefined Stream instances ``stdout`` & ``stderr``.
@@ -1628,14 +1642,14 @@ class Stream(Token):
     print("x", file=sys.stderr)
 
     """
-    __slots__ = ['name']
+    __slots__ = ('name',)
     _construct_name = String
 
 stdout = Stream('stdout')
 stderr = Stream('stderr')
 
 
-class Print(Token):
+class Print(ConstructSlots, AstNode):
     """ Represents print command in the code.
 
     Parameters
@@ -1654,7 +1668,7 @@ class Print(Token):
 
     """
 
-    __slots__ = ['print_args', 'format_string', 'file']
+    __slots__ = ('print_args', 'format_string', 'file')
     defaults = {'format_string': none, 'file': none}
 
     _construct_print_args = staticmethod(_mk_Tuple)
@@ -1662,7 +1676,7 @@ class Print(Token):
     _construct_file = Stream
 
 
-class FunctionPrototype(Node):
+class FunctionPrototype(HasAttrs):
     """ Represents a function prototype
 
     Allows the user to generate forward declaration in e.g. C/C++.
@@ -1688,7 +1702,7 @@ class FunctionPrototype(Node):
 
     """
 
-    __slots__ = ['return_type', 'name', 'parameters', 'attrs']
+    __slots__ = ('return_type', 'name', 'parameters', 'attrs')
 
     _construct_return_type = Type
     _construct_name = String
@@ -1758,11 +1772,11 @@ class FunctionDefinition(FunctionPrototype):
         return cls(body=body, **func_proto.kwargs())
 
 
-class Return(Basic):
+class Return(AstNode):
     """ Represents a return command in the code. """
 
 
-class FunctionCall(Token, Expr):
+class FunctionCall(ConstructSlots, AstNode, Expr):
     """ Represents a call to a function in the code.
 
     Parameters
@@ -1781,7 +1795,7 @@ class FunctionCall(Token, Expr):
     foo(bar, baz)
 
     """
-    __slots__ = ['name', 'function_args']
+    __slots__ = ('name', 'function_args')
 
     _construct_name = String
     _construct_function_args = staticmethod(lambda args: Tuple(*args))

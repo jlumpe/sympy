@@ -13,8 +13,8 @@ from sympy.core.function import Function
 from sympy.core.numbers import Float, Integer
 from sympy.core.sympify import sympify
 from sympy.codegen.ast import (
-    Attribute, CodeBlock, Declaration, FunctionCall, Node, none, String,
-    Token, Type, _mk_Tuple, Variable
+    Attribute, CodeBlock, Declaration, FunctionCall, none, String,
+    AstNode, Type, _mk_Tuple, Variable
 )
 from sympy.logic import true, false
 from sympy.utilities.iterables import iterable
@@ -30,7 +30,7 @@ intent_inout = Attribute('intent_inout')
 
 allocatable = Attribute('allocatable')
 
-class Program(Token):
+class Program(AstNode):
     """ Represents a 'program' block in Fortran
 
     Examples
@@ -50,7 +50,7 @@ class Program(Token):
     _construct_body = staticmethod(lambda body: CodeBlock(*body))
 
 
-class use_rename(Token):
+class use_rename(AstNode):
     """ Represents a renaming in a use statement in Fortran
 
     Examples
@@ -75,7 +75,7 @@ def _name(arg):
     else:
         return String(arg)
 
-class use(Token):
+class use(AstNode):
     """ Represents a use statement in Fortran
 
     Examples
@@ -97,7 +97,7 @@ class use(Token):
     _construct_only = staticmethod(lambda args: Tuple(*[arg if isinstance(arg, use_rename) else _name(arg) for arg in args]))
 
 
-class Module(Token):
+class Module(AstNode):
     """ Represents a module in Fortran
 
     Examples
@@ -122,7 +122,7 @@ class Module(Token):
     _construct_definitions = staticmethod(lambda arg: CodeBlock(*arg))
 
 
-class Subroutine(Node):
+class Subroutine(AstNode):
     """ Represents a subroutine in Fortran
 
     Examples
@@ -152,7 +152,7 @@ class Subroutine(Node):
         else:
             return CodeBlock(*itr)
 
-class SubroutineCall(Token):
+class SubroutineCall(AstNode):
     """ Represents a call to a subroutine in Fortran
 
     Examples
@@ -168,7 +168,7 @@ class SubroutineCall(Token):
     _construct_subroutine_args = staticmethod(_mk_Tuple)
 
 
-class Do(Token):
+class Do(AstNode):
     """ Represents a Do loop in in Fortran
 
     Examples
@@ -205,7 +205,7 @@ class Do(Token):
     _construct_concurrent = staticmethod(lambda arg: true if arg else false)
 
 
-class ArrayConstructor(Token):
+class ArrayConstructor(AstNode):
     """ Represents an array constructor
 
     Examples
@@ -224,7 +224,7 @@ class ArrayConstructor(Token):
     _construct_elements = staticmethod(_mk_Tuple)
 
 
-class ImpliedDoLoop(Token):
+class ImpliedDoLoop(AstNode):
     """ Represents an implied do loop in Fortran
 
     Examples
@@ -522,7 +522,7 @@ def bind_C(name=None):
     """
     return Attribute('bind_C', [String(name)] if name else [])
 
-class GoTo(Token):
+class GoTo(AstNode):
     """ Represents a goto statement in Fortran
 
     Examples
@@ -540,7 +540,7 @@ class GoTo(Token):
     _construct_expr = staticmethod(sympify)
 
 
-class FortranReturn(Token):
+class FortranReturn(AstNode):
     """ AST node explicitly mapped to a fortran "return".
 
     Because a return statement in fortran is different from C, and
@@ -626,14 +626,14 @@ class literal_dp(_literal):
     _decimals = 17
 
 
-class sum_(Token, Expr):
+class sum_(AstNode, Expr):
     __slots__ = ['array', 'dim', 'mask']
     defaults = {'dim': none, 'mask': none}
     _construct_array = staticmethod(sympify)
     _construct_dim = staticmethod(sympify)
 
 
-class product_(Token, Expr):
+class product_(AstNode, Expr):
     __slots__ = ['array', 'dim', 'mask']
     defaults = {'dim': none, 'mask': none}
     _construct_array = staticmethod(sympify)

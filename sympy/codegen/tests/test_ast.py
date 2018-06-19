@@ -13,7 +13,7 @@ from sympy.codegen.ast import (
     integer, real, complex_, int8, uint8, float16 as f16, float32 as f32,
     float64 as f64, float80 as f80, float128 as f128, complex64 as c64, complex128 as c128,
     While, Scope, String, Print, QuotedString, FunctionPrototype, FunctionDefinition, Return,
-    FunctionCall, untyped, IntBaseType, intc, Node, none, NoneToken, Token, Comment
+    FunctionCall, untyped, IntBaseType, intc, Node, none, NoneToken, AstNode, Comment
 )
 
 x, y, z, t, x0, x1, x2, a, b = symbols("x, y, z, t, x0, x1, x2, a, b")
@@ -231,7 +231,7 @@ def test_For():
 def test_none():
     assert none.is_Atom
     assert none == none
-    class Foo(Token):
+    class Foo(AstNode):
         pass
     foo = Foo()
     assert foo != none

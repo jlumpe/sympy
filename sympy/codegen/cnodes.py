@@ -6,7 +6,7 @@ from sympy.core.basic import Basic
 from sympy.core.compatibility import string_types
 from sympy.core.containers import Tuple
 from sympy.core.sympify import sympify
-from sympy.codegen.ast import Attribute, Declaration, Node, String, Token, Type, none, FunctionCall
+from sympy.codegen.ast import Attribute, Declaration, Node, String, AstNode, Type, none, FunctionCall
 
 void = Type('void')
 
@@ -54,7 +54,7 @@ class Label(String):
 
     """
 
-class goto(Token):
+class goto(AstNode):
     """ Represents goto in C """
     __slots__ = ['label']
     _construct_label = Label

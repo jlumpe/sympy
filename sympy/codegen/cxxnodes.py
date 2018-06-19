@@ -2,9 +2,9 @@
 AST nodes specific to C++.
 """
 
-from sympy.codegen.ast import Attribute, String, Token, Type, none
+from sympy.codegen.ast import Attribute, String, AstNode, ConstructSlots, Type, none
 
-class using(Token):
+class using(ConstructSlots, AstNode):
     """ Represents a 'using' statement in C++ """
     __slots__ = ['type', 'alias']
     defaults = {'alias': none}
