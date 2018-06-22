@@ -9,7 +9,9 @@ from sympy.core.compatibility import range
 import sympy
 from functools import partial
 
+
 theano = import_module('theano')
+
 if theano:
     ts = theano.scalar
     tt = theano.tensor
@@ -63,37 +65,48 @@ if theano:
             sympy.Transpose: tt.DimShuffle((False, False), [1, 0]),
     }
 
+
 class TheanoPrinter(Printer):
-    """ Code printer for Theano computations """
+    """ Code printer which creates Theano symbolic expression graphs. """
     printmethod = "_theano"
 
     def __init__(self, *args, **kwargs):
         self.cache = kwargs.pop('cache', dict())
         super(TheanoPrinter, self).__init__(*args, **kwargs)
 
-    def _print_Symbol(self, s, dtypes={}, broadcastables={}):
-        dtype = dtypes.get(s, 'floatX')
-        broadcastable = broadcastables.get(s, ())
-        key = (s.name, dtype, broadcastable, type(s))
+    def _get_or_create(self, s, name=None, dtype=None, broadcastable=None):
+        """
+        Get the Theano variable for a Sympy symbol from the cache, otherwise
+        create it.
+        """
+
+        # Defaults
+        if name is None:
+            name = s.name
+        if dtype is None:
+            dtype = 'floatX'
+        if broadcastable is None:
+            broadcastable = ()
+
+        key = (name, type(s), s.args, dtype, broadcastable)
+
         if key in self.cache:
             return self.cache[key]
-        else:
-            value = tt.tensor(name=s.name, dtype=dtype, broadcastable=broadcastable)
-            self.cache[key] = value
-            return value
 
-    def _print_AppliedUndef(self, s, dtypes={}, broadcastables={}):
-        dtype = dtypes.get(s, 'floatX')
-        broadcastable = broadcastables.get(s, ())
+        value = tt.tensor(name=name, dtype=dtype, broadcastable=broadcastable)
+        self.cache[key] = value
+        return value
+
+    def _print_Symbol(self, s, **kwargs):
+        dtype = kwargs.get('dtypes', {}).get(s)
+        bc = kwargs.get('broadcastables', {}).get(s)
+        return self._get_or_create(s, dtype=dtype, broadcastable=bc)
+
+    def _print_AppliedUndef(self, s, **kwargs):
         name = str(type(s)) + '_' + str(s.args[0])
-        key = (name, dtype, broadcastable, type(s), s.args)
-        if key in self.cache:
-            return self.cache[key]
-        else:
-            value = tt.tensor(name=name, dtype=dtype, broadcastable=broadcastable)
-            self.cache[key] = value
-            return value
-
+        dtype = kwargs.get('dtypes', {}).get(s)
+        bc = kwargs.get('broadcastables', {}).get(s)
+        return self._get_or_create(s, name=name, dtype=dtype, broadcastable=bc)
 
     def _print_Basic(self, expr, **kwargs):
         op = mapping[type(expr)]
@@ -101,17 +114,11 @@ class TheanoPrinter(Printer):
         return op(*children)
 
     def _print_Number(self, n, **kwargs):
-        return eval(str(n))
+        return float(n.evalf())
 
-    def _print_MatrixSymbol(self, X, dtypes={}, **kwargs):
-        dtype = dtypes.get(X, 'floatX')
-        key = (X.name, dtype, type(X))
-        if key in self.cache:
-            return self.cache[key]
-        else:
-            value = tt.Tensor(dtype, (False, False))(X.name)
-            self.cache[key] = value
-            return value
+    def _print_MatrixSymbol(self, X, **kwargs):
+        dtype = kwargs.get('dtypes', {}).get(X)
+        return self._get_or_create(X, dtype=dtype, broadcastable=(None, None))
 
     def _print_DenseMatrix(self, X, **kwargs):
         try:
@@ -119,9 +126,12 @@ class TheanoPrinter(Printer):
         except AttributeError:
             raise NotImplementedError(
                "Matrix translation not yet supported in this version of Theano")
-        else:
-            return tt.stacklists([[self._print(arg, **kwargs) for arg in L]
-                                         for L in X.tolist()])
+
+        return tt.stacklists([
+            [self._print(arg, **kwargs) for arg in L]
+            for L in X.tolist()
+        ])
+
     _print_ImmutableMatrix = _print_ImmutableDenseMatrix = _print_DenseMatrix
 
     def _print_MatMul(self, expr, **kwargs):
@@ -155,14 +165,20 @@ class TheanoPrinter(Printer):
 
     def _print_Piecewise(self, expr, **kwargs):
         import numpy as np
-        e, cond = expr.args[0].args
+        e, cond = expr.args[0].args  # First condition and corresponding value
+
+        # Print conditional expression and value for first condition
+        p_cond = self._print(cond, **kwargs)
+        p_e = self._print(e, **kwargs)
+
+        # One condition only
         if len(expr.args) == 1:
-            return tt.switch(self._print(cond, **kwargs),
-                             self._print(e, **kwargs),
-                             np.nan)
-        return tt.switch(self._print(cond, **kwargs),
-                         self._print(e, **kwargs),
-                         self._print(sympy.Piecewise(*expr.args[1:]), **kwargs))
+            # Return value if condition else NaN
+            return tt.switch(p_cond, p_e, np.nan)
+
+        # Return value_1 if condition_1 else evaluate remaining conditions
+        p_remaining = self._print(sympy.Piecewise(*expr.args[1:]), **kwargs)
+        return tt.switch(p_cond, p_e, p_remaining)
 
     def _print_Rational(self, expr, **kwargs):
         return tt.true_div(self._print(expr.p, **kwargs),
@@ -214,10 +230,24 @@ def dim_handling(inputs, dim=None, dims={}, broadcastables={}, keys=(),
 
 
 def theano_function(inputs, outputs, dtypes={}, cache=None, **kwargs):
-    """ Create Theano function from SymPy expressions """
+    """ Create Theano function from SymPy expressions.
+
+    Parameters:
+    ===========
+
+    inputs
+        Sequence of symbols which constitute the inputs of the function.
+
+    outputs
+        Sequence of expressions which constitute the outputs of the function.
+        These must be functions of the input symbols.
+
+    dtypes
+        Mapping from input symbols to Theano data types.
+    """
     if not theano:
         raise ImportError("theano is required for theano_function")
-    cache = {} if cache == None else cache
+    cache = {} if cache is None else cache
     broadcastables = dim_handling(inputs, **kwargs)
 
     # Remove keyword arguments corresponding to dim_handling
@@ -226,8 +256,8 @@ def theano_function(inputs, outputs, dtypes={}, cache=None, **kwargs):
     else:
         param = inspect.signature(dim_handling).parameters.items()
         dim_names = [n for n,p in param if p.kind == p.POSITIONAL_OR_KEYWORD]
-    theano_kwargs = dict((k, v) for k, v in kwargs.items()
-                                if k not in dim_names)
+
+    theano_kwargs = {k: v for k, v in kwargs.items() if k not in dim_names}
 
     code = partial(theano_code, cache=cache, dtypes=dtypes,
                    broadcastables=broadcastables)
