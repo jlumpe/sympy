@@ -67,31 +67,51 @@ if theano:
 
 
 class TheanoPrinter(Printer):
-    """ Code printer which creates Theano symbolic expression graphs. """
+    """ Code printer which creates Theano symbolic expression graphs.
+
+    Keyword arguments:
+    ==================
+
+    variables : dict
+
+    """
     printmethod = "_theano"
 
     def __init__(self, *args, **kwargs):
         self.cache = kwargs.pop('cache', dict())
+        variables = kwargs.pop('variables', {})
         super(TheanoPrinter, self).__init__(*args, **kwargs)
+
+        for s, v in variables.items():
+            key = self._get_key(s, None, None)
+            self.cache[key] = v
+
+    def _get_key(self, s, dtype=None, broadcastable=None, name=None):
+        
+        if name is None:
+            name = s.name
+
+        return (name, type(s), s.args, dtype, broadcastable)
+        return (name, type(s), s.args)
 
     def _get_or_create(self, s, name=None, dtype=None, broadcastable=None):
         """
         Get the Theano variable for a Sympy symbol from the cache, otherwise
         create it.
         """
-
         # Defaults
         if name is None:
             name = s.name
+
+        key = self._get_key(s, dtype=dtype, broadcastable=broadcastable)
+
+        if key in self.cache:
+            return self.cache[key]
+
         if dtype is None:
             dtype = 'floatX'
         if broadcastable is None:
             broadcastable = ()
-
-        key = (name, type(s), s.args, dtype, broadcastable)
-
-        if key in self.cache:
-            return self.cache[key]
 
         value = tt.tensor(name=name, dtype=dtype, broadcastable=broadcastable)
         self.cache[key] = value
@@ -114,6 +134,7 @@ class TheanoPrinter(Printer):
         return op(*children)
 
     def _print_Number(self, n, **kwargs):
+        # Integers already taken care of below, interpret as float
         return float(n.evalf())
 
     def _print_MatrixSymbol(self, X, **kwargs):
@@ -204,11 +225,41 @@ class TheanoPrinter(Printer):
         """Returns printer's representation for expr (as a string)"""
         return self._print(expr, **kwargs)
 
+
 global_cache = {}
 
-def theano_code(expr, cache=global_cache, **kwargs):
+def theano_code(expr, cache=None, **kwargs):
+    """ Convert a Sympy expression into a Theano variable.
+
+    Parameters:
+    ===========
+
+    expr : sympy.core.expr.Expr
+        Sympy expression object to convert.
+
+    cache : dict
+        When the Theano printer first encounters a symbol it creates a
+        corresponding Theano variable which is then cached so it can be looked
+        up later. By default a global cache is used which means additional calls
+        to this function will re-use previously-created variables. If you do not
+        want this to happen you can pass an empty dictionary to this parameter.
+
+    kwargs
+        Keyword arguments to :meth:`.TheanoPrinter.doprint`.
+
+    Returns:
+    ========
+
+    theano.gof.graph.Variable
+        A variable corresponding to the expression's value in a Theano symbolic
+        expression graph.
+    """
     if not theano:
         raise ImportError("theano is required for theano_code")
+
+    if cache is None:
+        cache = global_cache
+
     return TheanoPrinter(cache=cache, settings={}).doprint(expr, **kwargs)
 
 
