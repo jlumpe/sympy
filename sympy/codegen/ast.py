@@ -156,25 +156,26 @@ def _mk_Tuple(args):
     return Tuple(*args)
 
 
-class Token(Basic):
-    """ Base class for the AST types.
 
-    Defining fields are set in ``__slots__``. Attributes (defined in __slots__)
-    are only allowed to contain instances of Basic (unless atomic, see
-    ``String``). The arguments to ``__new__()`` correspond to the attributes in
-    the order defined in ``__slots__`. The ``defaults`` class attribute is a
-    dictionary mapping attribute names to their default values.
+
+class ConstructSlots(Basic):
+    """ Mixin for subclasses of Basic to conveniently set up instance attributes.
+
+    Defining fields are set in ``__slots__``. Fields are only allowed to contain
+    instances of Basic (unless atomic, see ``String``). The arguments to
+    ``__new__()`` correspond to the attributes in the order defined in
+    ``__slots__`. The ``defaults`` class attribute is a dictionary mapping
+    attribute names to their default values.
 
     Subclasses should not need to override the ``__new__()`` method. They may
-    define a class or static method named ``_construct_<attr>`` for each
-    attribute to process the value passed to ``__new__()``. Attributes listed
-    in the class attribute ``not_in_args`` are not passed to :class:`sympy.Basic`.
+    define a class or static method named ``_construct_<field>`` for each
+    attribute to process the value passed to ``__new__()``. Attributes listed in
+    the class attribute ``not_in_args`` are not passed to :class:`sympy.Basic`.
     """
 
-    __slots__ = []
+    __slots__ = ()
     defaults = {}
     not_in_args = []
-    indented_args = ['body']
 
     @property
     def is_Atom(self):
@@ -196,49 +197,61 @@ class Token(Basic):
             else:
                 return cls._get_constructor(attr)(arg)
 
+    @classmethod
+    def _get_field_values(cls, *args, **kwargs):
+        """ Get values for fields based on arguments to __new__. """
+        if len(args) > len(cls.__slots__):
+            raise ValueError("Too many arguments (%d), expected at most %d" % (len(args), len(cls.__slots__)))
+
+        fieldvals = []
+
+        # Process positional arguments
+        for field, argval in zip(cls.__slots__, args):
+            if field in kwargs:
+                raise TypeError('Got multiple values for field %r' % field)
+
+            fieldvals.append(cls._construct(field, argval))
+
+        # Process keyword arguments
+        for field in cls.__slots__[len(args):]:
+            if field in kwargs:
+                argval = kwargs.pop(field)
+
+            elif field in cls.defaults:
+                argval = cls.defaults[field]
+
+            else:
+                raise TypeError('No value for %r given and field has no default' % field)
+
+            fieldvals.append(cls._construct(field, argval))
+
+        if kwargs:
+            raise ValueError("Unknown keyword arguments: %s" % ' '.join(kwargs))
+
+        return fieldvals
+
     def __new__(cls, *args, **kwargs):
         # Pass through existing instances when given as sole argument
         if len(args) == 1 and not kwargs and isinstance(args[0], cls):
             return args[0]
 
-        if len(args) > len(cls.__slots__):
-            raise ValueError("Too many arguments (%d), expected at most %d" % (len(args), len(cls.__slots__)))
-
-        attrvals = []
-
-        # Process positional arguments
-        for attrname, argval in zip(cls.__slots__, args):
-            if attrname in kwargs:
-                raise TypeError('Got multiple values for attribute %r' % attrname)
-
-            attrvals.append(cls._construct(attrname, argval))
-
-        # Process keyword arguments
-        for attrname in cls.__slots__[len(args):]:
-            if attrname in kwargs:
-                argval = kwargs.pop(attrname)
-
-            elif attrname in cls.defaults:
-                argval = cls.defaults[attrname]
-
-            else:
-                raise TypeError('No value for %r given and attribute has no default' % attrname)
-
-            attrvals.append(cls._construct(attrname, argval))
-
-        if kwargs:
-            raise ValueError("Unknown keyword arguments: %s" % ' '.join(kwargs))
+        fieldvals = cls._get_field_values(*args, **kwargs)
 
         # Parent constructor
-        basic_args = [
-            val for attr, val in zip(cls.__slots__, attrvals)
-            if attr not in cls.not_in_args
-        ]
+        basic_args = []
+        for field, val in zip(cls.__slots__, fieldvals):
+            if field not in cls.not_in_args:
+                if not isinstance(val, Basic):
+                    raise TypeError(
+                        'Field values must be instances of Basic, not %r'
+                        % type(val)
+                    )
+                basic_args.append(val)
         obj = Basic.__new__(cls, *basic_args)
 
-        # Set attributes
-        for attr, arg in zip(cls.__slots__, attrvals):
-            setattr(obj, attr, arg)
+        # Set field values
+        for field, arg in zip(cls.__slots__, fieldvals):
+            setattr(obj, field, arg)
 
         return obj
 
@@ -252,6 +265,33 @@ class Token(Basic):
 
     def _hashable_content(self):
         return tuple([getattr(self, attr) for attr in self.__slots__])
+
+    def kwargs(self, exclude=(), apply=None):
+        """ Get instance's attributes as dict of keyword arguments.
+
+        Parameters:
+        ===========
+        exclude : collection of str
+            Collection of keywords to exclude.
+
+        apply : callable, optional
+            Function to apply to all values.
+        """
+        kwargs = {k: getattr(self, k) for k in self.__slots__ if k not in exclude}
+        if apply is not None:
+            return {k: apply(v) for k, v in kwargs.items()}
+        else:
+            return kwargs
+
+
+class Token(Basic, ConstructSlots):
+    """ Base class for the AST types.
+    """
+
+    __slots__ = []
+    defaults = {}
+    not_in_args = []
+    indented_args = ['body']
 
     def _joiner(self, k, indent_level):
         return (',\n' + ' '*indent_level) if k in self.indented_args else ', '
@@ -302,23 +342,6 @@ class Token(Basic):
     def __repr__(self):  # sympy.core.Basic.__repr__ uses sstr
         from sympy.printing import srepr
         return srepr(self)
-
-    def kwargs(self, exclude=(), apply=None):
-        """ Get instance's attributes as dict of keyword arguments.
-
-        Parameters:
-        ===========
-        exclude : collection of str
-            Collection of keywords to exclude.
-
-        apply : callable, optional
-            Function to apply to all values.
-        """
-        kwargs = {k: getattr(self, k) for k in self.__slots__ if k not in exclude}
-        if apply is not None:
-            return {k: apply(v) for k, v in kwargs.items()}
-        else:
-            return kwargs
 
 
 class BreakToken(Token):
