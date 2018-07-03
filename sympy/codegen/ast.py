@@ -253,9 +253,6 @@ class Token(Basic):
     def _hashable_content(self):
         return tuple([getattr(self, attr) for attr in self.__slots__])
 
-    def __hash__(self):
-        return super(Token, self).__hash__()
-
     def _joiner(self, k, indent_level):
         return (',\n' + ' '*indent_level) if k in self.indented_args else ', '
 
