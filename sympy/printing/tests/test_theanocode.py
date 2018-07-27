@@ -50,8 +50,13 @@ def theano_code_(expr, **kwargs):
     return theano_code(expr, **kwargs)
 
 def theano_function_(inputs, outputs, **kwargs):
-    """ Wrapper for theano_function that uses a new, empty cache by default. """
+    """ Wrapper for theano_function that uses a new, empty cache by default.
+
+    Also defaults to using ``use_dim_handing=False`` to avoid the old deprecated
+    behavior.
+    """
     kwargs.setdefault('cache', {})
+    kwargs.setdefault('use_dim_handling', False)
     return theano_function(inputs, outputs, **kwargs)
 
 
@@ -316,12 +321,10 @@ def test_theano_function_squeeze():
 
 def test_theano_function_numpy():
     """ Test theano_function() vs Numpy implementation. """
-    f = theano_function_([x, y], x+y, dim=1,
-                         dtypes={x: 'float64', y: 'float64'})
+    f = theano_function_([x, y], x+y, dims=1, dtypes={x: 'float64', y: 'float64'})
     assert np.linalg.norm(f([1, 2], [3, 4]) - np.asarray([4, 6])) < 1e-9
 
-    f = theano_function_([x, y], x+y, dtypes={x: 'float64', y: 'float64'},
-                                     dim=1)
+    f = theano_function_([x, y], x+y, dtypes={x: 'float64', y: 'float64'}, dims=1)
     xx = np.arange(3).astype('float64')
     yy = 2*np.arange(3).astype('float64')
     assert np.linalg.norm(f(xx, yy) - 3*np.arange(3)) < 1e-9
@@ -337,13 +340,13 @@ def test_theano_function_kwargs():
     Test passing additional kwargs from theano_function() to theano.function().
     """
     import numpy as np
-    f = theano_function_([x, y, z], x+y, dim=1, on_unused_input='ignore',
+    f = theano_function_([x, y, z], x+y, dims=1, on_unused_input='ignore',
             dtypes={x: 'float64', y: 'float64', z: 'float64'})
     assert np.linalg.norm(f([1, 2], [3, 4], [0, 0]) - np.asarray([4, 6])) < 1e-9
 
     f = theano_function_([x, y, z], x+y,
                         dtypes={x: 'float64', y: 'float64', z: 'float64'},
-                        dim=1, on_unused_input='ignore')
+                        dims=1, on_unused_input='ignore')
     xx = np.arange(3).astype('float64')
     yy = 2*np.arange(3).astype('float64')
     zz = 2*np.arange(3).astype('float64')
@@ -538,8 +541,8 @@ def test_global_cache():
         global_cache.clear()
 
         for s in [x, X, f_t]:
-            st = theano_code(s)
-            assert theano_code(s) is st
+            st = theano_code_(s, cache=None)
+            assert theano_code_(s, cache=None) is st
 
     finally:
         # Restore global cache

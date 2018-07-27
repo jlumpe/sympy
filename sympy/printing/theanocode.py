@@ -6,6 +6,7 @@ from sympy.external import import_module
 from sympy.printing.printer import Printer
 from sympy.core.compatibility import range, is_sequence
 from sympy.utilities.exceptions import SymPyDeprecationWarning
+from sympy.core.decorators import deprecated
 import sympy
 from functools import partial, wraps
 from sympy.core.function import AppliedUndef
@@ -645,12 +646,14 @@ def theano_code(expr, cache=None, **kwargs):
     return TheanoPrinter(cache=cache, settings={}).doprint(expr, **kwargs)
 
 
+@deprecated(issue=14985, deprecated_since_version='1.2.1',  # TODO - update?
+            useinstead='"dims" argument to TheanoPrinter.doprint()')
 def dim_handling(inputs, dim=None, dims=None, broadcastables=None):
     """
     Get value of ``broadcastables`` argument to :func:`.theano_code` from
     keyword arguments to :func:`.theano_function`.
 
-    Included for backwards compatibility.
+    This function is deprecated and has been included for backwards compatibility.
 
     Parameters
     ==========
@@ -660,11 +663,16 @@ def dim_handling(inputs, dim=None, dims=None, broadcastables=None):
 
     dim : int
         Common number of dimensions for all inputs. Overrides other arguments
-        if given.
+        if given. Values of returned dict will be ``(False,) * dim`` for all
+        symbols.
 
     dims : dict
-        Mapping from input symbols to number of dimensions. Overrides
-        ``broadcastables`` argument if given.
+        Mapping from input symbols to number of dimensions. Values for each key
+        are built by creating a tuple of ``False`` values times the number of
+        dimensions for that key and then padding it *on the right* with ``True``
+        values so that all tuples have equal length. Not that this is opposite
+        to the auto-broadcasting behavior of Numpy, which adds dimensions on the
+        left. Overrides the ``broadcastables`` argument if given.
 
     broadcastables : dict
         Explicit value of ``broadcastables`` argument to
@@ -692,7 +700,8 @@ def dim_handling(inputs, dim=None, dims=None, broadcastables=None):
     return {}
 
 
-def theano_function(inputs, outputs, squeeze=True, scalar=False, **kwargs):
+def theano_function(inputs, outputs, squeeze=True, scalar=False,
+                    use_dim_handling=True, **kwargs):
     """ Create a Theano function from SymPy expressions.
 
     The inputs and outputs are converted to Theano variables using
@@ -708,6 +717,11 @@ def theano_function(inputs, outputs, squeeze=True, scalar=False, **kwargs):
         Expression or sequence of expressions which constitute the outputs(s) of
         the function. The free symbols of each expression must be a subset of
         ``inputs``.
+
+    use_dim_handling : bool
+        Pass ``dim``, ``dims``, and ``broadcastables`` keyword arguments to
+        :func:`.dim_handling`` to generate
+        This behavior is deprecated and will be removed in a future release.
 
     squeeze : bool
         If ``outputs`` is a sequence of length one, pass the printed value of
@@ -799,20 +813,40 @@ def theano_function(inputs, outputs, squeeze=True, scalar=False, **kwargs):
         ).warn()
         outputs = outputs[0]
 
-    # Pop off non-theano keyword args
-    cache = kwargs.pop('cache', {})
-    dtypes = kwargs.pop('dtypes', {})
-
-    broadcastables = dim_handling(
-        inputs,
-        dim=kwargs.pop('dim', None),
-        dims=kwargs.pop('dims', None),
-        broadcastables=kwargs.pop('broadcastables', None),
+    # Keyword arguments to theano_code
+    theano_code_kw = dict(
+        cache=kwargs.pop('cache', {}),
+        dtypes=kwargs.pop('dtypes', {}),
     )
 
+    # Old deprecated way of creating "broadcastables" argument
+    if use_dim_handling:
+        SymPyDeprecationWarning(
+            feature='theano_function() with use_dim_handling=True',
+            issue=14985,
+            deprecated_since_version='1.2.1',  # TODO - update?
+        ).warn()
+        theano_code_kw['broadcastables'] = dim_handling(
+            inputs,
+            dim=kwargs.pop('dim', None),
+            dims=kwargs.pop('dims', None),
+            broadcastables=kwargs.pop('broadcastables', None),
+        )
+
+    # New way is to let printer handle it
+    else:
+        if 'dim' in kwargs:
+            raise TypeError(
+                '"dim" keyword argument is only valid if use_dim_handling=True'
+            )
+
+        theano_code_kw.update(
+            broadcastables=kwargs.pop('broadcastables', None),
+            dims=kwargs.pop('dims', None),
+        )
+
     # Print inputs/outputs
-    code = partial(theano_code, cache=cache, dtypes=dtypes,
-                   broadcastables=broadcastables)
+    code = partial(theano_code, **theano_code_kw)
     tinputs  = list(map(code, inputs))
 
     is_seq = is_sequence(outputs)
