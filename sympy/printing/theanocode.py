@@ -47,6 +47,7 @@ if theano:
             sympy.loggamma: tt.gammaln,
             sympy.Pow: tt.pow,
             sympy.Eq: tt.eq,
+            sympy.Ne: tt.neq,
             sympy.StrictGreaterThan: tt.gt,
             sympy.StrictLessThan: tt.lt,
             sympy.LessThan: tt.le,
@@ -249,6 +250,12 @@ class TheanoPrinter(Printer):
         rowslice = self._print(slice(*expr.rowslice), **kwargs)
         colslice = self._print(slice(*expr.colslice), **kwargs)
         return parent[rowslice, colslice]
+
+    def _print_MatrixElement(self, expr, **kwargs):
+        parent = self._print(expr.parent, **kwargs)
+        i = self._print(expr.i, **kwargs)
+        j = self._print(expr.j, **kwargs)
+        return parent[i, j]
 
     def _print_BlockMatrix(self, expr, **kwargs):
         nrows, ncols = expr.blocks.shape

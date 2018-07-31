@@ -428,6 +428,7 @@ def test_MatrixSlice():
     Y = X[1:2:3, 4:5:6]
     Yt = theano_code_(Y, cache=cache)
 
+    assert isinstance(Yt.owner.op, tt.Subtensor)
     s = ts.Scalar('int64')
     assert tuple(Yt.owner.op.idx_list) == (slice(s, s, s), slice(s, s, s))
     assert Yt.owner.inputs[0] == theano_code_(X, cache=cache)
@@ -441,6 +442,23 @@ def test_MatrixSlice():
     Y = X[start:stop:step]
     Yt = theano_code_(Y, dtypes={n: 'int32', k: 'int32'})
     # assert Yt.owner.op.idx_list[0].stop == kt
+
+def test_MatrixElement():
+    cache = {}
+
+    n = sy.Symbol('n', integer=True)
+    X = sy.MatrixSymbol('X', n, n)
+
+    idx = (2, 3)
+    Y = X[idx]
+    Yt = theano_code_(Y, cache=cache)
+
+    assert isinstance(Yt.owner.op, tt.Subtensor)
+    assert Yt.owner.inputs[0] is theano_code_(X, cache=cache)
+    assert all(
+        isinstance(in_, ts.ScalarConstant) and in_.value == i
+        for in_, i in zip(Yt.owner.inputs[1:], idx)
+    )
 
 def test_BlockMatrix():
     n = sy.Symbol('n', integer=True)
@@ -609,7 +627,7 @@ def test_Piecewise():
 
 def test_Relationals():
     assert theq(theano_code_(sy.Eq(x, y)), tt.eq(xt, yt))
-    # assert theq(theano_code_(sy.Ne(x, y)), tt.neq(xt, yt))  # TODO - implement
+    assert theq(theano_code_(sy.Ne(x, y)), tt.neq(xt, yt))
     assert theq(theano_code_(x > y), xt > yt)
     assert theq(theano_code_(x < y), xt < yt)
     assert theq(theano_code_(x >= y), xt >= yt)
