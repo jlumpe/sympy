@@ -5,7 +5,8 @@ from sympy.printing.printer import Printer
 from sympy.core.compatibility import range, is_sequence
 from sympy.utilities.exceptions import SymPyDeprecationWarning
 import sympy
-from functools import partial
+from functools import partial, wraps
+from sympy.core.sympify import sympify
 
 
 theano = import_module('theano')
@@ -62,6 +63,67 @@ if theano:
             sympy.Inverse: tlinalg.matrix_inverse,
             sympy.Transpose: tt.DimShuffle((False, False), [1, 0]),
     }
+
+
+def _sympify_shape(shape):
+    """
+    Convert elements of a shape tuple to Sympy objects and check that they are
+    positive integers.
+    """
+    shape = sympify(tuple(shape))
+
+    for s in shape:
+        if s.is_integer is False:
+            raise ValueError('Element of shape tuple is non-integer: %r' % s)
+        if s.is_negative:
+            raise ValueError('Element of shape tuple is negative: %r' % s)
+
+    return shape
+
+
+def broadcastable_from_shape(shape):
+    """
+    Get the ``broadcastable`` attribute for a Theano variable from the shape of
+    a multidimensional array.
+
+    Just returns a tuple with True where the size of a dimension is 1 and False
+    elsewhere.
+
+    Parameters
+    ==========
+    shape : tuple
+        A tuple of integers or Sympy expressions representing integers.
+
+    Returns
+    =======
+    tuple
+        Tuple of bools with same length as ``shape``.
+    """
+    return tuple(s == 1 for s in shape)
+
+
+def broadcastable_matches_shape(shape, broadcastable):
+    """
+    Check if the ``broadcastable`` attribute of a Theano variable is constistent
+    with an array shape.
+
+    Parameters
+    ==========
+    shape : tuple
+        A tuple of integers or Sympy expressions representing integers.
+
+    broadcastable : tuple
+        Tuple of bools with same length as ``shape``.
+
+    Returns
+    =======
+    bool
+        False if any dimension with size != 1 is broadcastable, True otherwise.
+    """
+    if len(shape) != len(broadcastable):
+        raise ValueError('Arguments must have the same length')
+
+    return [not bc or s == 1 for s, bc in zip(shape, broadcastable)]
 
 
 class TheanoPrinter(Printer):
