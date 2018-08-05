@@ -315,37 +315,131 @@ class TheanoPrinter(Printer):
 
         self.mapping = ChainMap(self.impl, mapping)
 
-    def _get_or_create(self, s, name=None, dtype=None, broadcastable=None):
-        """
-        Get the Theano variable for a Sympy symbol from the cache, or create it
-        if it does not exist.
-        """
+        # Add existing variables
+        if variables is not None:
+            self.cache.update(variables)
 
-        # Defaults
+    def _create_variable(self, s, name=None, dtype=None, broadcastable=None, ndim=None):
+        """ Create a new Theano variable for a sympy object and cache it. """
         if name is None:
             name = s.name
         if dtype is None:
             dtype = 'floatX'
         if broadcastable is None:
-            broadcastable = ()
+            broadcastable = (False,) * ndim if ndim is not None else ()
 
-        if s in self.cache:
-            return self.cache[s]
+        var = tt.tensor(name=name, dtype=dtype, broadcastable=broadcastable)
+        self.cache[s] = var
+        return var
 
-        value = tt.tensor(name=name, dtype=dtype, broadcastable=broadcastable)
-        self.cache[s] = value
-        return value
+    def _check_cached(self, s, cached, dtype=None, broadcastable=None, ndim=None):
+        """
+        Check that a cached variable matches requested data type and dimensions.
+
+        Raises
+        ======
+        ValueError
+            If the cached variable does not have the requested properties.
+        """
+
+        # Check dtype
+        if ((dtype == 'floatX' and not cached.dtype.startswith('float')) or
+            (dtype is not None and dtype != cached.dtype)):
+            raise ValueError(
+                'Cached variable %r has dtype %r, but %r was requested'
+                % (s, cached.dtype, dtype)
+            )
+
+        # Check broadcastable
+        if broadcastable is not None and broadcastable != cached.broadcastable:
+            raise ValueError(
+                'Cached variable %r has broadcastable %r, but %r was requested'
+                % (s, cached.broadcastable, broadcastable)
+            )
+
+        # Check dims
+        if ndim is not None and ndim != cached.ndim:
+            raise ValueError(
+                'Cached variable %r has dimension %r, but %r was requested'
+                % (s, len(cached.broadcastable), ndim)
+            )
+
+    def _get_or_create(self, s, name=None, **kwargs):
+        """
+        Get the Theano variable for a Sympy symbol from the cache, or create it
+        if it does not exist.
+
+        Parameters
+        ==========
+
+        s
+            Sympy symbol to get variable for.
+
+        name : str
+            Name of Theano variable to create, if not accessible as ``s.name``.
+
+        dtype : str
+            Theano dtype for variable. Defaults to ``'floatX'``. If not None
+            and a cached variable exists it is expected to match.
+
+        broadcastable : tuple of bool
+            ``broadcastable`` attribute of Theano variable. If not None and a
+            cached variable exists it is expected to match.
+
+        ndim : int
+            Number of dimensions of Theano variable. If not None and a cached
+            variable exists it is expected to match.
+
+        Returns
+        ======
+        theano.gof.graph.Variable
+            Existing cached Theano variable for the function, or a newly created
+            one.
+
+        Raises
+        ======
+        ValueError
+            If the cached variable does not have the requested properties.
+        """
+
+        # Try getting existing
+        cached = self.cache.get(s)
+        if cached is not None:
+            self._check_cached(s, cached, **kwargs)
+            return cached
+
+        # Create a new one
+        return self._create_variable(s, name=name, **kwargs)
+
+    @staticmethod
+    def _get_or_create_args(s, dtypes=None, broadcastables=None, dims=None, **kwargs):
+        """
+        Get keyword arguments to ``_get_or_create()`` for specific symbol, from
+        keyword arguments to ``doprint()``.
+        """
+        kw = {}
+
+        if dtypes is not None:
+            kw['dtype'] = dtypes.get(s)
+
+        if broadcastables is not None:
+            kw['broadcastable'] = broadcastables.get(s)
+
+        if isinstance(dims, int):
+            # "dims" is integer, common number of dimensions for all arrays
+            kw['ndim'] = dims
+        elif dims is not None and s in dims:
+            # Assume "dims" is a mapping from symbols to number of dimensions
+            kw['ndim'] = dims[s]
+
+        return kw
 
     def _print_Symbol(self, s, **kwargs):
-        dtype = kwargs.get('dtypes', {}).get(s)
-        bc = kwargs.get('broadcastables', {}).get(s)
-        return self._get_or_create(s, dtype=dtype, broadcastable=bc)
+        return self._get_or_create(s, **self._get_or_create_args(s, **kwargs))
 
     def _print_AppliedUndef(self, s, **kwargs):
         name = str(type(s)) + '_' + str(s.args[0])
-        dtype = kwargs.get('dtypes', {}).get(s)
-        bc = kwargs.get('broadcastables', {}).get(s)
-        return self._get_or_create(s, name=name, dtype=dtype, broadcastable=bc)
+        return self._get_or_create(s, name=name, **self._get_or_create_args(s, **kwargs))
 
     def _print_Basic(self, expr, **kwargs):
         try:
@@ -361,8 +455,17 @@ class TheanoPrinter(Printer):
         return float(n.evalf())
 
     def _print_MatrixSymbol(self, X, **kwargs):
-        dtype = kwargs.get('dtypes', {}).get(X)
-        return self._get_or_create(X, dtype=dtype, broadcastable=(None, None))
+        tensor_kw = self._get_or_create_args(X, **kwargs)
+        bc = tensor_kw.get('broadcastable')
+
+        # Check requested dimension
+        if (bc is not None and bc < 2) or tensor_kw.get('ndim', 2) != 2:
+            raise ValueError('Matrix variables must be two-dimensional')
+
+        if bc is None:
+            tensor_kw.setdefault('ndim', 2)
+
+        return self._get_or_create(X, **tensor_kw)
 
     def _print_DenseMatrix(self, X, **kwargs):
         try:
@@ -450,7 +553,7 @@ class TheanoPrinter(Printer):
     def emptyPrinter(self, expr):
         return expr
 
-    def doprint(self, expr, dtypes=None, broadcastables=None):
+    def doprint(self, expr, dtypes=None, broadcastables=None, dims=None):
         """ Convert a Sympy expression to a Theano graph variable.
 
         The ``dtypes`` and ``broadcastables`` arguments are used to specify the
@@ -482,6 +585,9 @@ class TheanoPrinter(Printer):
             variables for those symbols. Defaults to the empty tuple for symbols
             not included in the mapping (resulting in a scalar).
 
+        dims : dict or int
+            # TODO
+
         Returns
         =======
 
@@ -498,7 +604,7 @@ class TheanoPrinter(Printer):
         if broadcastables is None:
             broadcastables = {}
 
-        return self._print(expr, dtypes=dtypes, broadcastables=broadcastables)
+        return self._print(expr, dtypes=dtypes, broadcastables=broadcastables, dims=dims)
 
 
 global_cache = TheanoVarCache()
