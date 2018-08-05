@@ -1,6 +1,6 @@
 from __future__ import print_function, division
 
-from collections import ChainMap
+from collections import MutableMapping, ChainMap
 
 from sympy.external import import_module
 from sympy.printing.printer import Printer
@@ -8,6 +8,7 @@ from sympy.core.compatibility import range, is_sequence
 from sympy.utilities.exceptions import SymPyDeprecationWarning
 import sympy
 from functools import partial, wraps
+from sympy.core.function import AppliedUndef
 from sympy.core.sympify import sympify
 
 
@@ -129,20 +130,141 @@ def broadcastable_matches_shape(shape, broadcastable):
     return [not bc or s == 1 for s, bc in zip(shape, broadcastable)]
 
 
+
+
+
+class TheanoVarCache(MutableMapping):
+    """ Stores a mapping from Sympy expressions to Theano variables.
+
+    Parameters
+    ==========
+
+    other
+        TODO
+
+    _dict
+        TODO
+    """
+
+    def __init__(self, other=None, _dict=None):
+        # Stores the internal representation of the mapping. Keys are tuples
+        # generated from expressions, values are (expr, theano_variable) pairs.
+        self._dict = {} if _dict is None else _dict
+        if other is not None:
+            self.update(other)
+
+    def __len__(self):
+        return len(self._dict)
+
+    def __iter__(self):
+        return (symbol for symbol, var in self._dict.values())
+
+    def __contains__(self, expr):
+        key = self._get_key(expr)
+        return key in self._dict
+
+    @classmethod
+    def is_cacheable(cls, obj):
+        pass  # TODO
+
+    def __getitem__(self, expr):
+        key = self._get_key(expr)
+
+        try:
+            s, v = self._dict[key]
+            return v
+        except KeyError:
+            pass
+
+        raise KeyError(expr)
+
+    def __delitem__(self, expr):
+        key = self._get_key(expr)
+        try:
+            del self._dict[key]
+            return
+        except KeyError:
+            pass
+
+        raise KeyError(expr)
+
+    def __setitem__(self, expr, variable):
+        key = self._get_key(expr)
+        self._dict[key] = (expr, variable)
+
+    def _get_key(self, expr):
+        """ Get the key for a Sympy object in _dict. """
+
+        if not isinstance(expr, sympy.Basic):
+            raise TypeError('Expected instance of sympy.Basic, not %r' % type(expr))
+
+        if isinstance(expr, sympy.Dummy):
+            # Dummies are only considered equal to themselves, dummy instances
+            # should have different keys even if they have the same name.
+            return (type(expr), expr)
+
+        if isinstance(expr, (sympy.Symbol, sympy.MatrixSymbol)):
+            # Symbol and MatrixSymbol discriminated only by name
+            return (type(expr), expr.name)
+
+        if isinstance(expr, AppliedUndef):
+            return (type(expr), expr.args)
+
+        raise TypeError(
+            'Sympy object of type %r cannot be mapped to a Theano variable'
+            % type(expr)
+        )
+
+    def copy(self):
+        """ Return a copy of the cache with its own data.
+
+        Returns
+        =======
+        TheanoVarCache
+        """
+        return TheanoVarCache(self)
+
+    def add(self, symbol, variable, overwrite=False):
+        """ Associate a Sympy symbol with an existing Theano variable.
+
+        Functions the same as ``cache[symbol] = variable`` if ``overwrite=True``.
+
+        Parameters:
+        ===========
+
+        symbol : sympy.core.symbol.Symbol or sympy.matrices.expressions.matexpr.MatrixSymbol
+            Sympy symbol that will be replaced with the variable when printing.
+
+        variable : theano.gof.graph.Variable
+            Theano variable to associate with symbol.
+
+        overwrite : bool
+            Whether to overwrite existing associations for the symbol.
+        """
+        if not overwrite and symbol in self:
+            raise KeyError('Symbol %r already exists in cache' % symbol)
+
+        self[symbol] = variable
+
+
 class TheanoPrinter(Printer):
     """ Code printer which creates Theano symbolic expression graphs.
 
     Parameters
     ==========
 
-    cache : dict
-        Cache dictionary to use (see :attr:`cache`). If None (default) will use
-        the global cache. To create a printer which does not depend on or alter
-        global state pass an empty dictionary. Note: the dictionary is not
-        copied on initialization of the printer and will be updated in-place,
-        so using the same dict object when creating multiple printers or making
-        multiple calls to :func:`.theano_code` or :func:`.theano_function` means
-        the cache is shared between all these applications.
+    cache : .TheanoVarCache or dict
+        Cached mapping from Sympy objects to existing Theano variables. Defaults
+        to the global cache. May pass an empty :class:`.TheanoVarCache` instance
+        or empty dictionary in its place to create a printer instance which is
+        independent of the global state. If a ``dict`` is given it will be used
+        as the cache's internal storage, enabling reuse in other functions in
+        this module, but the data in it is essentially opaque to the user. Note:
+        the cache is not copied on initialization of the printer and will be
+        updated in-place, so using the same cache object when creating multiple
+        printers or making multiple calls to :func:`.theano_code` or
+        :func:`.theano_function` means the cache is shared between all these
+        applications.
 
     impl : dict
         Dictionary or other mapping from subclasses of
@@ -150,6 +272,10 @@ class TheanoPrinter(Printer):
         must be a Theano op (instance of :class:`theano.gof.op.Op`) or any other
         callable which takes the printed versions of
         :attr:`sympy.core.basic.Basic.args` and returns a Theano variable.
+
+    variables
+        Mapping from Sympy symbols to existing Theano variables they represent.
+        These are simply merged into ``cache``.
 
     Attributes
     ==========
@@ -166,9 +292,15 @@ class TheanoPrinter(Printer):
     printmethod = "_theano"
 
     def __init__(self, *args, **kwargs):
-        self.cache = kwargs.pop('cache', dict())
+        cache = kwargs.pop('cache', None)
         impl = kwargs.pop('impl', {})
+        variables = kwargs.pop('variables', None)
         super(TheanoPrinter, self).__init__(*args, **kwargs)
+
+        if isinstance(cache, TheanoVarCache):
+            self.cache = cache
+        else:
+            self.cache = TheanoVarCache(_dict=cache)
 
         # Implementations of additional functions
         self.impl = {}
@@ -182,24 +314,6 @@ class TheanoPrinter(Printer):
             self.impl[key] = value
 
         self.mapping = ChainMap(self.impl, mapping)
-
-    def _get_key(self, s, name=None, dtype=None, broadcastable=None):
-        """ Get the cache key for a Sympy object.
-
-        Parameters
-        ==========
-
-        s : sympy.core.basic.Basic
-            Sympy object to get key for.
-
-        name : str
-            Name of object, if it does not have a ``name`` attribute.
-        """
-
-        if name is None:
-            name = s.name
-
-        return (name, type(s), s.args, dtype, broadcastable)
 
     def _get_or_create(self, s, name=None, dtype=None, broadcastable=None):
         """
@@ -215,13 +329,11 @@ class TheanoPrinter(Printer):
         if broadcastable is None:
             broadcastable = ()
 
-        key = self._get_key(s, name, dtype=dtype, broadcastable=broadcastable)
-
-        if key in self.cache:
-            return self.cache[key]
+        if s in self.cache:
+            return self.cache[s]
 
         value = tt.tensor(name=name, dtype=dtype, broadcastable=broadcastable)
-        self.cache[key] = value
+        self.cache[s] = value
         return value
 
     def _print_Symbol(self, s, **kwargs):
@@ -389,7 +501,7 @@ class TheanoPrinter(Printer):
         return self._print(expr, dtypes=dtypes, broadcastables=broadcastables)
 
 
-global_cache = {}
+global_cache = TheanoVarCache()
 
 
 def theano_code(expr, cache=None, **kwargs):
@@ -401,9 +513,9 @@ def theano_code(expr, cache=None, **kwargs):
     expr : sympy.core.expr.Expr
         Sympy expression object to convert.
 
-    cache : dict
-       Cached Theano variables (see :attr:`.TheanoPrinter.cache`). Defaults to
-       the module-level global cache.
+    cache : .TheanoVarCache
+       Cached Theano variables (see ``cache`` argument to :class:`.TheanoPrinter`).
+       Defaults to the module-level global cache.
 
     dtypes : dict
         Passed to :meth:`.TheanoPrinter.doprint`.
@@ -503,9 +615,9 @@ def theano_function(inputs, outputs, squeeze=True, scalar=False, **kwargs):
         Convert 0-dimensional arrays in output to scalars. This will return a
         Python wrapper function around the Theano function object.
 
-    cache : dict
-       Cached Theano variables (see :attr:`.TheanoPrinter.cache`). Defaults to
-       the module-level global cache.
+    cache : .TheanoVarCache
+       Cached Theano variables (see ``cache`` argument to :class:`.TheanoPrinter`).
+       Defaults to the module-level global cache.
 
     dtypes : dict
         Passed to :meth:`.TheanoPrinter.doprint`.

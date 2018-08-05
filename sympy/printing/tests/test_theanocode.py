@@ -33,7 +33,7 @@ import sympy as sy
 from sympy import S
 from sympy.abc import x, y, z, t
 from sympy.printing.theanocode import (theano_code, dim_handling,
-        theano_function)
+        theano_function, TheanoVarCache)
 
 
 # Default set of matrix symbols for testing - make square so we can both
@@ -566,7 +566,7 @@ def test_cache_types_distinct():
 
     # Check retrieving
     for s, st in printed.items():
-        assert theano_code(s, cache=cache) is st
+        assert theano_code_(s, cache=cache) is st
 
 def test_symbols_are_created_once():
     """
@@ -632,3 +632,55 @@ def test_Relationals():
     assert theq(theano_code_(x < y), xt < yt)
     assert theq(theano_code_(x >= y), xt >= yt)
     assert theq(theano_code_(x <= y), xt <= yt)
+
+
+def test_cache_specificity():
+    """ Test cache discriminates between set of distinct symbols. """
+
+    # These objects should all by considered distinct
+    f, g = sy.symbols('f g')
+    symbols = {x, y, X, Y, f(x), f(y), g(x), f(x, y)}
+
+    cache = TheanoVarCache()
+    mapping = {}  # sympy -> theano, should end up being equivalent to cache
+
+    # Print each symbol with cache and check recall
+    for s in symbols:
+        assert s not in cache
+        v = theano_code_(s, cache=cache)
+        assert cache[s] is v
+        mapping[s] = v
+
+    # Check nothing got overwritten
+    assert set(cache.keys()) == symbols
+    for s in symbols:
+        assert cache[s] is mapping[s]
+
+def test_cache_mapping_api():
+    """Test that the cache implements the MutableMapping API correctly."""
+    # TODO
+
+def test_cache_dummy():
+    """Test the cache with Dummy instances as keys."""
+    cache = TheanoVarCache()
+    d1 = sy.Dummy('x')
+    v1 = tt.tensor(name='x', dtype='floatX', broadcastable=())
+
+    # Check adding dummy works correctly
+    assert d1 not in cache
+    cache[d1] = v1
+    assert cache[d1] is v1
+
+    # Check that a new Dummy instance with the same name functions as a
+    # different key
+    d2 = sy.Dummy('x')
+    assert d2 not in cache
+    raises(KeyError, lambda: cache[d2])
+
+    v2 = tt.tensor(name='another x', dtype='floatX', broadcastable=())
+    cache[d2] = v2
+    assert d2 in cache
+    assert cache[d2] is v2
+
+    # Check we haven't overwritten the other dummy
+    assert cache[d1] is v1
