@@ -1,5 +1,7 @@
 from __future__ import print_function, division
 
+from collections import ChainMap
+
 from sympy.external import import_module
 from sympy.printing.printer import Printer
 from sympy.core.compatibility import range, is_sequence
@@ -132,6 +134,7 @@ class TheanoPrinter(Printer):
 
     Parameters
     ==========
+
     cache : dict
         Cache dictionary to use (see :attr:`cache`). If None (default) will use
         the global cache. To create a printer which does not depend on or alter
@@ -140,6 +143,13 @@ class TheanoPrinter(Printer):
         so using the same dict object when creating multiple printers or making
         multiple calls to :func:`.theano_code` or :func:`.theano_function` means
         the cache is shared between all these applications.
+
+    impl : dict
+        Dictionary or other mapping from subclasses of
+        :class:`sympy.core.basic.Basic` to their Theano implementations. Values
+        must be a Theano op (instance of :class:`theano.gof.op.Op`) or any other
+        callable which takes the printed versions of
+        :attr:`sympy.core.basic.Basic.args` and returns a Theano variable.
 
     Attributes
     ==========
@@ -157,7 +167,21 @@ class TheanoPrinter(Printer):
 
     def __init__(self, *args, **kwargs):
         self.cache = kwargs.pop('cache', dict())
+        impl = kwargs.pop('impl', {})
         super(TheanoPrinter, self).__init__(*args, **kwargs)
+
+        # Implementations of additional functions
+        self.impl = {}
+        for key, value in impl.items():
+            if isinstance(key, str):
+                key = sympy.Function(key)
+            if isinstance(key, sympy.Symbol):
+                key = sympy.Function(key.name)
+            if not (isinstance(key, type) and issubclass(key, sympy.Basic)):
+                raise TypeError('Keys of impl must be string')
+            self.impl[key] = value
+
+        self.mapping = ChainMap(self.impl, mapping)
 
     def _get_key(self, s, name=None, dtype=None, broadcastable=None):
         """ Get the cache key for a Sympy object.
@@ -212,7 +236,11 @@ class TheanoPrinter(Printer):
         return self._get_or_create(s, name=name, dtype=dtype, broadcastable=bc)
 
     def _print_Basic(self, expr, **kwargs):
-        op = mapping[type(expr)]
+        try:
+            op = self.mapping[type(expr)]
+        except KeyError:
+            raise TypeError("Don't know how to print Sympy type %r" % type(expr))
+
         children = [self._print(arg, **kwargs) for arg in expr.args]
         return op(*children)
 
