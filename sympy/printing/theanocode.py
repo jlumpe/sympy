@@ -291,12 +291,15 @@ class TheanoPrinter(Printer):
         format of the cache's contents should be considered opaque to the user.
     """
     printmethod = "_theano"
+    _default_settings = {
+        'auto_create': True,
+    }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, **kwargs):
         cache = kwargs.pop('cache', None)
         impl = kwargs.pop('impl', {})
         variables = kwargs.pop('variables', None)
-        super(TheanoPrinter, self).__init__(*args, **kwargs)
+        super(TheanoPrinter, self).__init__(settings=kwargs)
 
         if isinstance(cache, TheanoVarCache):
             self.cache = cache
@@ -319,6 +322,23 @@ class TheanoPrinter(Printer):
         # Add existing variables
         if variables is not None:
             self.cache.update(variables)
+
+    def _check_not_cached(self, s):
+        if s in self.cache:
+            raise KeyError('Symbol %r is already associated with a Theano variable' % s)
+
+    def create(self, s, overwrite=False, **kwargs):
+        if not overwrite:
+            self._check_not_cached(s)
+        return self._create_variable(s, **kwargs)
+
+    def get_or_create(self, s, **kwargs):
+        return self._get_or_create(s, **kwargs)
+
+    def assign(self, s, variable, overwrite=False):
+        if not overwrite:
+            self._check_not_cached(s)
+        self.cache[s] = variable
 
     def _create_variable(self, s, name=None, dtype=None, broadcastable=None, ndim=None):
         """ Create a new Theano variable for a sympy object and cache it. """
@@ -365,7 +385,7 @@ class TheanoPrinter(Printer):
                 % (s, len(cached.broadcastable), ndim)
             )
 
-    def _get_or_create(self, s, name=None, **kwargs):
+    def _get_or_create(self, s, create=True, **kwargs):
         """
         Get the Theano variable for a Sympy symbol from the cache, or create it
         if it does not exist.
@@ -410,15 +430,18 @@ class TheanoPrinter(Printer):
             return cached
 
         # Create a new one
-        return self._create_variable(s, name=name, **kwargs)
+        if create:
+            return self._create_variable(s, **kwargs)
+
+        raise KeyError('Variable for %r does not exist and auto_create option is disabled' % s)
 
     @staticmethod
-    def _get_or_create_args(s, dtypes=None, broadcastables=None, dims=None, **kwargs):
+    def _get_or_create_args(s, dtypes=None, broadcastables=None, dims=None, auto_create=True, **kwargs):
         """
         Get keyword arguments to ``_get_or_create()`` for specific symbol, from
         keyword arguments to ``doprint()``.
         """
-        kw = {}
+        kw = dict(create=auto_create)
 
         if dtypes is not None:
             kw['dtype'] = dtypes.get(s)
@@ -554,7 +577,8 @@ class TheanoPrinter(Printer):
     def emptyPrinter(self, expr):
         return expr
 
-    def doprint(self, expr, dtypes=None, broadcastables=None, dims=None):
+    def doprint(self, expr, dtypes=None, broadcastables=None, dims=None,
+                assign=None, overwrite=False, auto_create=None):
         """ Convert a Sympy expression to a Theano graph variable.
 
         The ``dtypes`` and ``broadcastables`` arguments are used to specify the
@@ -600,12 +624,23 @@ class TheanoPrinter(Printer):
         ========
         theano.tensor.Tensor
         """
+        if assign and not overwrite:
+            self._check_not_cached(assign)
+
         if dtypes is None:
             dtypes = {}
         if broadcastables is None:
             broadcastables = {}
+        if auto_create is None:
+            auto_create = self._settings['auto_create']
 
-        return self._print(expr, dtypes=dtypes, broadcastables=broadcastables, dims=dims)
+        var = self._print(expr, dtypes=dtypes, broadcastables=broadcastables,
+                          dims=dims, auto_create=auto_create)
+
+        if assign is not None:
+            self.assign(assign, var, overwrite=overwrite)
+
+        return var
 
 
 global_cache = TheanoVarCache()
